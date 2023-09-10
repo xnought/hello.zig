@@ -1,12 +1,13 @@
 const std = @import("std");
 const print = std.debug.print;
 const allocator = std.heap.page_allocator;
+var rand = std.rand.DefaultPrng.init(42);
 
 fn matrix(comptime t: type) type {
     return struct {
         shape: [2]usize,
-        data: [*]t,
-        pub fn init(data: [*]t, shape: [2]usize) @This() {
+        data: []t,
+        pub fn init(data: []t, shape: [2]usize) @This() {
             return @This(){ .data = data, .shape = shape };
         }
         pub fn print(self: @This()) void {
@@ -49,18 +50,44 @@ fn matrix(comptime t: type) type {
                 }
             }
         }
+
+        pub fn alloc(shape: [2]usize) !@This() {
+            var d: []t = try allocator.alloc(t, shape[0] * shape[1]);
+            var m: @This() = @This().init(d, shape);
+            return m;
+        }
+        pub fn free(self: @This()) void {
+            allocator.free(self.data);
+        }
+        pub fn a_matmul(self: @This(), other: @This()) !@This() {
+            var out: @This() = try @This().alloc([2]usize{ self.shape[0], other.shape[1] });
+            self.matmul(other, out);
+            return out;
+        }
+        pub fn randu(shape: [2]usize) !@This() {
+            var m: @This() = try @This().alloc(shape);
+            var i: usize = 0;
+            while (i < shape[0] * shape[1]) : (i += 1) {
+                m.data[i] = @floatCast(t, rand.random().float(f32));
+            }
+            return m;
+        }
     };
 }
 
 const Matrix = matrix(f16);
 
 pub fn main() !void {
-    var d: [4]f16 = .{ 0, 1, 2, 3 };
-    var d_ptr: [*]f16 = &d;
-    var out: [4]f16 = .{ 0, 0, 0, 0 };
-    var s = [2]usize{ 2, 2 };
-    var a = Matrix.init(d_ptr, s);
-    var c = Matrix.init(&out, s);
-    a.matmul(a, c);
-    c.print();
+    // as if I had a batch of 64 with 1000 input neurons and 1000 output neurons
+    var a: Matrix = try Matrix.randu([2]usize{ 64, 1000 });
+    var b: Matrix = try Matrix.randu([2]usize{ 1000, 1000 });
+    defer a.free();
+    defer b.free();
+
+    const start = std.time.milliTimestamp();
+    var c = try a.a_matmul(b);
+    defer c.free();
+    const end = std.time.milliTimestamp();
+
+    print("time: {}\n", .{end - start});
 }
